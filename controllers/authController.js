@@ -68,11 +68,12 @@ exports.sendOTP = async (req, res, next) => {
       });
     }
 
-    await sendEmail({
+    // Send email in background — don't block the response
+    sendEmail({
       to: email,
       subject: 'Your BlogHub verification code',
       html: otpEmailHtml(name || 'there', otp),
-    });
+    }).catch((err) => console.error('Email send error:', err));
 
     res.status(200).json({ success: true, message: 'OTP sent to your email' });
   } catch (error) {
