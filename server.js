@@ -33,6 +33,7 @@ app.use('/api/blogs', require('./routes/blogRoutes'));
 app.use('/api/blogs/:blogId/comments', require('./routes/commentRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 
+app.get('/', (req, res) => res.json({ status: 'OK', message: 'BlogHub API is running' }));
 app.get('/api/health', (req, res) => res.json({ status: 'OK', timestamp: new Date() }));
 
 app.use(errorHandler);
