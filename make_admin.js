@@ -1,16 +1,6 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
-
-const userSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String },
-  role: { type: String, enum: ['user', 'admin'], default: 'user' },
-  isVerified: { type: Boolean, default: false }
-}, { timestamps: true });
-
-const User = mongoose.models.User || mongoose.model('User', userSchema);
+const RealUser = require('./models/User');
 
 async function createOrUpdateAdmin() {
   try {
@@ -19,26 +9,24 @@ async function createOrUpdateAdmin() {
 
     const email = 'ramzan@gmail.com';
     const password = 'ramzan@123!';
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    let user = await User.findOne({ email });
+    
+    let user = await RealUser.findOne({ email });
     
     if (user) {
       console.log('User found. Updating to admin and resetting password...');
       user.role = 'admin';
-      user.password = hashedPassword;
-      user.isVerified = true;
+      user.password = password; // pre-save hook will hash this!
+      user.isEmailVerified = true;
       await user.save();
       console.log('User updated successfully.');
     } else {
       console.log('User not found. Creating new admin user...');
-      user = new User({
+      user = new RealUser({
         name: 'Ramzan Admin',
         email,
-        password: hashedPassword,
+        password: password, // pre-save hook will hash this!
         role: 'admin',
-        isVerified: true
+        isEmailVerified: true
       });
       await user.save();
       console.log('Admin user created successfully.');
