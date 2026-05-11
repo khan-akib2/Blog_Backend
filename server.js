@@ -27,17 +27,40 @@ app.use(express.urlencoded({ extended: true }));
 
 if (process.env.NODE_ENV === 'development') app.use(morgan('dev'));
 
-// Routes
+// ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/admin/login', require('./routes/adminLoginRoute')); // no rate limit for admin
 app.use('/api/blogs', require('./routes/blogRoutes'));
 app.use('/api/blogs/:blogId/comments', require('./routes/commentRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/newsletter', require('./routes/subscriberRoutes'));
 
+// ── Health / status ───────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.json({ status: 'OK', message: 'BlogHub API is running' }));
 app.get('/api', (req, res) => res.json({ status: 'OK', message: 'BlogHub API is running' }));
 app.get('/api/health', (req, res) => res.json({ status: 'OK', timestamp: new Date() }));
 
+// ── Temporary email test — remove after confirming email works ─────────────────
+app.get('/api/test-email', async (req, res) => {
+  const sendEmail = require('./utils/sendEmail');
+  try {
+    await sendEmail({
+      to: process.env.EMAIL_FROM,
+      subject: 'BlogHub Email Test',
+      html: '<p>If you see this, Brevo email is working correctly on Render.</p>',
+    });
+    res.json({ success: true, message: `Test email sent to ${process.env.EMAIL_FROM}` });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      apiKeySet: !!process.env.BREVO_API_KEY,
+      emailFrom: process.env.EMAIL_FROM || 'NOT SET',
+    });
+  }
+});
+
+// ── Error handler ─────────────────────────────────────────────────────────────
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
