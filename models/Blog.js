@@ -9,6 +9,7 @@ const blogSchema = new mongoose.Schema(
     excerpt: { type: String, maxlength: 300 },
     thumbnail: { type: String, default: '' },
     thumbnailPublicId: { type: String, default: '' },
+    thumbnailType: { type: String, enum: ['image', 'video'], default: 'image' },
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     category: {
       type: String,
@@ -19,6 +20,8 @@ const blogSchema = new mongoose.Schema(
     status: { type: String, enum: ['draft', 'pending', 'approved', 'rejected'], default: 'draft' },
     rejectionReason: { type: String, default: '' },
     views: { type: Number, default: 0 },
+    // Tracks unique viewers to prevent repeated view inflation
+    viewedBy: [{ type: String }], // stores userId or IP fingerprint
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     readingTime: { type: Number, default: 0 },
     isFeatured: { type: Boolean, default: false },

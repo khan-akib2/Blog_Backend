@@ -47,8 +47,31 @@ exports.getBlogBySlug = async (req, res, next) => {
     }
     if (!blog) return res.status(404).json({ success: false, message: 'Blog not found' });
 
-    blog.views += 1;
-    await blog.save({ validateBeforeSave: false });
+    // Unique view tracking — use userId if authenticated, else IP address
+    // Only count a view once per user/IP per 24 hours (stored as "id:timestamp" or "ip:timestamp")
+    const jwt = require('jsonwebtoken');
+    let viewerId = req.ip || 'unknown';
+    if (req.headers.authorization) {
+      try {
+        const token = req.headers.authorization.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        viewerId = `user:${decoded.id}`;
+      } catch (_) {}
+    }
+
+    const now = Date.now();
+    const cooldownMs = 24 * 60 * 60 * 1000; // 24 hours
+    // viewedBy entries are stored as "viewerId|timestamp"
+    const existingEntry = blog.viewedBy.find((v) => v.startsWith(viewerId + '|'));
+    const lastViewedAt = existingEntry ? parseInt(existingEntry.split('|')[1], 10) : 0;
+
+    if (now - lastViewedAt > cooldownMs) {
+      // Remove old entry for this viewer and add fresh one
+      blog.viewedBy = blog.viewedBy.filter((v) => !v.startsWith(viewerId + '|'));
+      blog.viewedBy.push(`${viewerId}|${now}`);
+      blog.views += 1;
+      await blog.save({ validateBeforeSave: false });
+    }
 
     res.json({ success: true, blog });
   } catch (error) {
@@ -78,7 +101,7 @@ exports.createBlog = async (req, res, next) => {
     let thumbnailPublicId = '';
 
     if (req.file) {
-      const result = await uploadToCloudinary(req.file.buffer);
+      const result = await uploadToCloudinary(req.file.buffer, 'blog-thumbnails', req.file.mimetype);
       thumbnail = result.secure_url;
       thumbnailPublicId = result.public_id;
     }
@@ -98,6 +121,7 @@ exports.createBlog = async (req, res, next) => {
       excerpt,
       thumbnail,
       thumbnailPublicId,
+      thumbnailType: req.file?.mimetype?.startsWith('video/') ? 'video' : 'image',
       author: req.user._id,
       category,
       tags: tags ? tags.split(',').map((t) => t.trim()) : [],
@@ -127,10 +151,11 @@ exports.updateBlog = async (req, res, next) => {
     const { title, content, category, tags, status, conclusion } = req.body;
 
     if (req.file) {
-      if (blog.thumbnailPublicId) await deleteFromCloudinary(blog.thumbnailPublicId);
-      const result = await uploadToCloudinary(req.file.buffer);
+      if (blog.thumbnailPublicId) await deleteFromCloudinary(blog.thumbnailPublicId, blog.thumbnailType || 'image');
+      const result = await uploadToCloudinary(req.file.buffer, 'blog-thumbnails', req.file.mimetype);
       blog.thumbnail = result.secure_url;
       blog.thumbnailPublicId = result.public_id;
+      blog.thumbnailType = req.file.mimetype?.startsWith('video/') ? 'video' : 'image';
     }
 
     // Parse FAQs — sent as JSON string from FormData
@@ -161,7 +186,7 @@ exports.deleteBlog = async (req, res, next) => {
     if (blog.author.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
-    if (blog.thumbnailPublicId) await deleteFromCloudinary(blog.thumbnailPublicId);
+    if (blog.thumbnailPublicId) await deleteFromCloudinary(blog.thumbnailPublicId, blog.thumbnailType || 'image');
     await blog.deleteOne();
     res.json({ success: true, message: 'Blog deleted' });
   } catch (error) {
