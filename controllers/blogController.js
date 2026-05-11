@@ -73,7 +73,7 @@ exports.getTrendingBlogs = async (req, res, next) => {
 // @desc  Create blog
 exports.createBlog = async (req, res, next) => {
   try {
-    const { title, content, category, tags, status } = req.body;
+    const { title, content, category, tags, status, conclusion } = req.body;
     let thumbnail = '';
     let thumbnailPublicId = '';
 
@@ -81,6 +81,12 @@ exports.createBlog = async (req, res, next) => {
       const result = await uploadToCloudinary(req.file.buffer);
       thumbnail = result.secure_url;
       thumbnailPublicId = result.public_id;
+    }
+
+    // Parse FAQs — sent as JSON string from FormData
+    let faqs = [];
+    if (req.body.faqs) {
+      try { faqs = JSON.parse(req.body.faqs); } catch (_) {}
     }
 
     const blogStatus = status === 'pending' ? 'pending' : 'draft';
@@ -96,6 +102,8 @@ exports.createBlog = async (req, res, next) => {
       category,
       tags: tags ? tags.split(',').map((t) => t.trim()) : [],
       status: blogStatus,
+      faqs,
+      conclusion: conclusion || '',
     });
 
     res.status(201).json({ success: true, blog });
@@ -116,7 +124,7 @@ exports.updateBlog = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Cannot edit an approved blog' });
     }
 
-    const { title, content, category, tags, status } = req.body;
+    const { title, content, category, tags, status, conclusion } = req.body;
 
     if (req.file) {
       if (blog.thumbnailPublicId) await deleteFromCloudinary(blog.thumbnailPublicId);
@@ -125,10 +133,16 @@ exports.updateBlog = async (req, res, next) => {
       blog.thumbnailPublicId = result.public_id;
     }
 
+    // Parse FAQs — sent as JSON string from FormData
+    if (req.body.faqs) {
+      try { blog.faqs = JSON.parse(req.body.faqs); } catch (_) {}
+    }
+
     if (title) blog.title = title;
     if (content) { blog.content = content; blog.excerpt = content.replace(/<[^>]*>/g, '').substring(0, 250) + '...'; }
     if (category) blog.category = category;
     if (tags) blog.tags = tags.split(',').map((t) => t.trim());
+    if (conclusion !== undefined) blog.conclusion = conclusion;
     if (status === 'pending') blog.status = 'pending';
     else if (status === 'draft') blog.status = 'draft';
 

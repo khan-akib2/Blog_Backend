@@ -22,6 +22,13 @@ const blogSchema = new mongoose.Schema(
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     readingTime: { type: Number, default: 0 },
     isFeatured: { type: Boolean, default: false },
+    faqs: [
+      {
+        question: { type: String, trim: true },
+        answer: { type: String, trim: true },
+      },
+    ],
+    conclusion: { type: String, default: '' },
   },
   { timestamps: true }
 );
