@@ -40,26 +40,6 @@ app.get('/', (req, res) => res.json({ status: 'OK', message: 'BlogHub API is run
 app.get('/api', (req, res) => res.json({ status: 'OK', message: 'BlogHub API is running' }));
 app.get('/api/health', (req, res) => res.json({ status: 'OK', timestamp: new Date() }));
 
-// ── Temporary email test — remove after confirming email works ─────────────────
-app.get('/api/test-email', async (req, res) => {
-  const sendEmail = require('./utils/sendEmail');
-  try {
-    await sendEmail({
-      to: process.env.EMAIL_FROM,
-      subject: 'BlogHub Email Test',
-      html: '<p>If you see this, Brevo email is working correctly on Render.</p>',
-    });
-    res.json({ success: true, message: `Test email sent to ${process.env.EMAIL_FROM}` });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: err.message,
-      apiKeySet: !!process.env.BREVO_API_KEY,
-      emailFrom: process.env.EMAIL_FROM || 'NOT SET',
-    });
-  }
-});
-
 // ── Error handler ─────────────────────────────────────────────────────────────
 app.use(errorHandler);
 
