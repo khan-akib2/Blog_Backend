@@ -9,6 +9,7 @@ const {
   sendOTP,
   verifyOTP,
   googleAuth,
+  googleAuthToken,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 const upload = require('../middleware/upload');
@@ -26,6 +27,7 @@ router.post('/verify-otp', verifyOTP);
 router.post('/register', sendOTP); // alias
 router.post('/login', validateLogin, login);
 router.post('/google', googleAuth);
+router.post('/google-token', googleAuthToken);
 router.get('/me', protect, getMe);
 router.put('/profile', protect, updateProfile);
 router.put('/avatar', protect, upload.single('avatar'), updateAvatar);

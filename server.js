@@ -11,6 +11,9 @@ connectDB();
 
 const app = express();
 
+// Start scheduled blog publisher
+const { startScheduledPublisher } = require('./utils/scheduledPublisher');
+
 // Security
 app.use(helmet());
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000', credentials: true }));
@@ -34,6 +37,8 @@ app.use('/api/blogs', require('./routes/blogRoutes'));
 app.use('/api/blogs/:blogId/comments', require('./routes/commentRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/newsletter', require('./routes/subscriberRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/ai', require('./routes/aiRoutes'));
 
 // ── Health / status ───────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.json({ status: 'OK', message: 'BlogHub API is running' }));
@@ -44,4 +49,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'OK', timestamp: new Dat
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+  startScheduledPublisher();
+});

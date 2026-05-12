@@ -147,7 +147,7 @@ exports.login = async (req, res, next) => {
   }
 };
 
-// ─── google oauth ─────────────────────────────────────────────────────────────
+// ─── google oauth (credential / ID token) ────────────────────────────────────
 
 exports.googleAuth = async (req, res, next) => {
   try {
@@ -160,6 +160,68 @@ exports.googleAuth = async (req, res, next) => {
     });
     const payload = ticket.getPayload();
     const { sub: googleId, email, name, picture } = payload;
+
+    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+
+    if (user) {
+      if (!user.googleId) {
+        user.googleId = googleId;
+        user.authProvider = 'google';
+        user.isEmailVerified = true;
+        if (!user.avatar && picture) user.avatar = picture;
+        await user.save({ validateBeforeSave: false });
+      }
+    } else {
+      user = await User.create({
+        name,
+        email,
+        googleId,
+        avatar: picture || '',
+        authProvider: 'google',
+        isEmailVerified: true,
+      });
+    }
+
+    if (!user.isActive) return res.status(401).json({ success: false, message: 'Account deactivated' });
+
+    const token = generateToken(user._id);
+    res.json({
+      success: true,
+      token,
+      user: { _id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ─── google oauth (access token flow) ────────────────────────────────────────
+
+exports.googleAuthToken = async (req, res, next) => {
+  try {
+    const { access_token } = req.body;
+    if (!access_token) return res.status(400).json({ success: false, message: 'Access token required' });
+
+    // Fetch user info from Google using the access token
+    const https = require('https');
+    const userInfo = await new Promise((resolve, reject) => {
+      const request = https.get(
+        `https://www.googleapis.com/oauth2/v3/userinfo`,
+        { headers: { Authorization: `Bearer ${access_token}` } },
+        (response) => {
+          let data = '';
+          response.on('data', (chunk) => { data += chunk; });
+          response.on('end', () => {
+            if (response.statusCode === 200) resolve(JSON.parse(data));
+            else reject(new Error(`Google userinfo error: ${data}`));
+          });
+        }
+      );
+      request.on('error', reject);
+    });
+
+    const { sub: googleId, email, name, picture } = userInfo;
+    if (!email) return res.status(400).json({ success: false, message: 'Could not retrieve email from Google' });
 
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
 

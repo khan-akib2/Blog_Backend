@@ -7,6 +7,7 @@ const commentSchema = new mongoose.Schema(
     content: { type: String, required: true, maxlength: 1000 },
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     parentComment: { type: mongoose.Schema.Types.ObjectId, ref: 'Comment', default: null },
+    isAdminNote: { type: Boolean, default: false }, // admin-only feedback visible only to blog author
   },
   { timestamps: true }
 );

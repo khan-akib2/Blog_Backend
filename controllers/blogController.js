@@ -1,15 +1,24 @@
 const Blog = require('../models/Blog');
+const Notification = require('../models/Notification');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../utils/uploadToCloudinary');
 
-// @desc  Get all approved blogs (public)
+// ─── Get all approved blogs (public) ─────────────────────────────────────────
 exports.getBlogs = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, category, search, sort = '-createdAt', tag } = req.query;
+    const { page = 1, limit = 10, category, search, sort = '-createdAt', tag, author } = req.query;
     const query = { status: 'approved' };
 
     if (category) query.category = category;
     if (tag) query.tags = tag;
-    if (search) query.$text = { $search: search };
+    if (author) query.author = author;
+    if (search) {
+      // Use text index if available, otherwise regex fallback
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { tags: { $regex: search, $options: 'i' } },
+        { excerpt: { $regex: search, $options: 'i' } },
+      ];
+    }
 
     const total = await Blog.countDocuments(query);
     const blogs = await Blog.find(query)
@@ -17,7 +26,7 @@ exports.getBlogs = async (req, res, next) => {
       .sort(sort)
       .skip((page - 1) * limit)
       .limit(Number(limit))
-      .select('-content');
+      .select('-content -viewedBy');
 
     res.json({
       success: true,
@@ -29,7 +38,7 @@ exports.getBlogs = async (req, res, next) => {
   }
 };
 
-// @desc  Get single blog by slug
+// ─── Get single blog by slug ──────────────────────────────────────────────────
 exports.getBlogBySlug = async (req, res, next) => {
   try {
     // Allow author to preview their own non-approved blogs via ?preview=true
@@ -48,7 +57,6 @@ exports.getBlogBySlug = async (req, res, next) => {
     if (!blog) return res.status(404).json({ success: false, message: 'Blog not found' });
 
     // Unique view tracking — use userId if authenticated, else IP address
-    // Only count a view once per user/IP per 24 hours (stored as "id:timestamp" or "ip:timestamp")
     const jwt = require('jsonwebtoken');
     let viewerId = req.ip || 'unknown';
     if (req.headers.authorization) {
@@ -61,12 +69,10 @@ exports.getBlogBySlug = async (req, res, next) => {
 
     const now = Date.now();
     const cooldownMs = 24 * 60 * 60 * 1000; // 24 hours
-    // viewedBy entries are stored as "viewerId|timestamp"
     const existingEntry = blog.viewedBy.find((v) => v.startsWith(viewerId + '|'));
     const lastViewedAt = existingEntry ? parseInt(existingEntry.split('|')[1], 10) : 0;
 
     if (now - lastViewedAt > cooldownMs) {
-      // Remove old entry for this viewer and add fresh one
       blog.viewedBy = blog.viewedBy.filter((v) => !v.startsWith(viewerId + '|'));
       blog.viewedBy.push(`${viewerId}|${now}`);
       blog.views += 1;
@@ -79,24 +85,68 @@ exports.getBlogBySlug = async (req, res, next) => {
   }
 };
 
-// @desc  Get trending blogs
+// ─── Get trending blogs ───────────────────────────────────────────────────────
 exports.getTrendingBlogs = async (req, res, next) => {
   try {
     const blogs = await Blog.find({ status: 'approved' })
       .populate('author', 'name avatar')
       .sort('-views -likes')
       .limit(6)
-      .select('-content');
+      .select('-content -viewedBy');
     res.json({ success: true, blogs });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc  Create blog
+// ─── Get featured / editor's pick blogs ──────────────────────────────────────
+exports.getFeaturedBlogs = async (req, res, next) => {
+  try {
+    const { type = 'featured' } = req.query; // 'featured' | 'trending' | 'editorsPick'
+    const flagMap = { featured: 'isFeatured', trending: 'isTrending', editorsPick: 'isEditorsPick' };
+    const flag = flagMap[type] || 'isFeatured';
+
+    const blogs = await Blog.find({ status: 'approved', [flag]: true })
+      .populate('author', 'name avatar')
+      .sort('-createdAt')
+      .limit(6)
+      .select('-content -viewedBy');
+    res.json({ success: true, blogs });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ─── Get related blogs ────────────────────────────────────────────────────────
+exports.getRelatedBlogs = async (req, res, next) => {
+  try {
+    const blog = await Blog.findById(req.params.id).select('tags category author');
+    if (!blog) return res.status(404).json({ success: false, message: 'Blog not found' });
+
+    // Find blogs with matching tags or same category, excluding current blog
+    const related = await Blog.find({
+      _id: { $ne: blog._id },
+      status: 'approved',
+      $or: [
+        { tags: { $in: blog.tags } },
+        { category: blog.category },
+      ],
+    })
+      .populate('author', 'name avatar')
+      .sort('-views -createdAt')
+      .limit(4)
+      .select('-content -viewedBy');
+
+    res.json({ success: true, blogs: related });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ─── Create blog ──────────────────────────────────────────────────────────────
 exports.createBlog = async (req, res, next) => {
   try {
-    const { title, content, category, tags, status, conclusion } = req.body;
+    const { title, content, category, tags, status, conclusion, scheduledAt } = req.body;
     let thumbnail = '';
     let thumbnailPublicId = '';
 
@@ -112,7 +162,18 @@ exports.createBlog = async (req, res, next) => {
       try { faqs = JSON.parse(req.body.faqs); } catch (_) {}
     }
 
-    const blogStatus = status === 'pending' ? 'pending' : 'draft';
+    let blogStatus = status === 'pending' ? 'pending' : 'draft';
+    let schedDate = null;
+
+    // Handle scheduled publishing
+    if (scheduledAt) {
+      const d = new Date(scheduledAt);
+      if (!isNaN(d.getTime()) && d > new Date()) {
+        blogStatus = 'scheduled';
+        schedDate = d;
+      }
+    }
+
     const excerpt = content.replace(/<[^>]*>/g, '').substring(0, 250) + '...';
 
     const blog = await Blog.create({
@@ -122,10 +183,12 @@ exports.createBlog = async (req, res, next) => {
       thumbnail,
       thumbnailPublicId,
       thumbnailType: req.file?.mimetype?.startsWith('video/') ? 'video' : 'image',
+      thumbnailPosition: req.body.thumbnailPosition || '50% 50%',
       author: req.user._id,
       category,
-      tags: tags ? tags.split(',').map((t) => t.trim()) : [],
+      tags: tags ? tags.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean) : [],
       status: blogStatus,
+      scheduledAt: schedDate,
       faqs,
       conclusion: conclusion || '',
     });
@@ -136,7 +199,7 @@ exports.createBlog = async (req, res, next) => {
   }
 };
 
-// @desc  Update blog
+// ─── Update blog ──────────────────────────────────────────────────────────────
 exports.updateBlog = async (req, res, next) => {
   try {
     const blog = await Blog.findById(req.params.id);
@@ -166,8 +229,9 @@ exports.updateBlog = async (req, res, next) => {
     if (title) blog.title = title;
     if (content) { blog.content = content; blog.excerpt = content.replace(/<[^>]*>/g, '').substring(0, 250) + '...'; }
     if (category) blog.category = category;
-    if (tags) blog.tags = tags.split(',').map((t) => t.trim());
+    if (tags !== undefined) blog.tags = tags.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
     if (conclusion !== undefined) blog.conclusion = conclusion;
+    if (req.body.thumbnailPosition) blog.thumbnailPosition = req.body.thumbnailPosition;
     if (status === 'pending') blog.status = 'pending';
     else if (status === 'draft') blog.status = 'draft';
 
@@ -178,7 +242,7 @@ exports.updateBlog = async (req, res, next) => {
   }
 };
 
-// @desc  Delete blog
+// ─── Delete blog ──────────────────────────────────────────────────────────────
 exports.deleteBlog = async (req, res, next) => {
   try {
     const blog = await Blog.findById(req.params.id);
@@ -194,7 +258,7 @@ exports.deleteBlog = async (req, res, next) => {
   }
 };
 
-// @desc  Get user's own blogs
+// ─── Get user's own blogs ─────────────────────────────────────────────────────
 exports.getMyBlogs = async (req, res, next) => {
   try {
     const { page = 1, limit = 10, status } = req.query;
@@ -206,7 +270,7 @@ exports.getMyBlogs = async (req, res, next) => {
       .sort('-createdAt')
       .skip((page - 1) * limit)
       .limit(Number(limit))
-      .select('-content');
+      .select('-content -viewedBy');
 
     res.json({ success: true, blogs, pagination: { total, page: Number(page), pages: Math.ceil(total / limit) } });
   } catch (error) {
@@ -214,7 +278,7 @@ exports.getMyBlogs = async (req, res, next) => {
   }
 };
 
-// @desc  Like / unlike blog
+// ─── Like / unlike blog ───────────────────────────────────────────────────────
 exports.toggleLike = async (req, res, next) => {
   try {
     const blog = await Blog.findById(req.params.id);
@@ -231,7 +295,7 @@ exports.toggleLike = async (req, res, next) => {
   }
 };
 
-// @desc  Toggle bookmark
+// ─── Toggle bookmark ──────────────────────────────────────────────────────────
 exports.toggleBookmark = async (req, res, next) => {
   try {
     const User = require('../models/User');
@@ -246,13 +310,13 @@ exports.toggleBookmark = async (req, res, next) => {
   }
 };
 
-// @desc  Get bookmarked blogs
+// ─── Get bookmarked blogs ─────────────────────────────────────────────────────
 exports.getBookmarks = async (req, res, next) => {
   try {
     const User = require('../models/User');
     const user = await User.findById(req.user._id).populate({
       path: 'bookmarks',
-      select: '-content',
+      select: '-content -viewedBy',
       populate: { path: 'author', select: 'name avatar' },
     });
     res.json({ success: true, blogs: user.bookmarks });
@@ -261,14 +325,77 @@ exports.getBookmarks = async (req, res, next) => {
   }
 };
 
-// @desc  Get author profile blogs
+// ─── Get author profile blogs ─────────────────────────────────────────────────
 exports.getAuthorBlogs = async (req, res, next) => {
   try {
+    const { page = 1, limit = 12 } = req.query;
+    const total = await Blog.countDocuments({ author: req.params.authorId, status: 'approved' });
     const blogs = await Blog.find({ author: req.params.authorId, status: 'approved' })
       .sort('-createdAt')
-      .limit(10)
-      .select('-content');
-    res.json({ success: true, blogs });
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
+      .select('-content -viewedBy');
+    res.json({ success: true, blogs, pagination: { total, page: Number(page), pages: Math.ceil(total / limit) } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ─── Report a blog ────────────────────────────────────────────────────────────
+exports.reportBlog = async (req, res, next) => {
+  try {
+    const { reason = 'other', description = '' } = req.body;
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) return res.status(404).json({ success: false, message: 'Blog not found' });
+    if (blog.status !== 'approved') return res.status(400).json({ success: false, message: 'Blog not found' });
+
+    // Prevent duplicate reports from same user
+    const alreadyReported = blog.reports.some((r) => r.user?.toString() === req.user._id.toString());
+    if (alreadyReported) {
+      return res.status(400).json({ success: false, message: 'You have already reported this blog' });
+    }
+
+    blog.reports.push({ user: req.user._id, reason, description });
+    blog.reportCount = blog.reports.length;
+    await blog.save({ validateBeforeSave: false });
+
+    res.json({ success: true, message: 'Report submitted. Our team will review it.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ─── Track share ──────────────────────────────────────────────────────────────
+exports.trackShare = async (req, res, next) => {
+  try {
+    await Blog.findByIdAndUpdate(req.params.id, { $inc: { shares: 1 } });
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ─── Get public author profile ────────────────────────────────────────────────
+exports.getAuthorProfile = async (req, res, next) => {
+  try {
+    const User = require('../models/User');
+    const author = await User.findById(req.params.authorId).select('name avatar bio createdAt');
+    if (!author) return res.status(404).json({ success: false, message: 'Author not found' });
+
+    const totalPublished = await Blog.countDocuments({ author: req.params.authorId, status: 'approved' });
+    const totalViews = await Blog.aggregate([
+      { $match: { author: author._id, status: 'approved' } },
+      { $group: { _id: null, total: { $sum: '$views' } } },
+    ]);
+
+    res.json({
+      success: true,
+      author: {
+        ...author.toObject(),
+        totalPublished,
+        totalViews: totalViews[0]?.total || 0,
+      },
+    });
   } catch (error) {
     next(error);
   }

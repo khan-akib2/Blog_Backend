@@ -54,6 +54,16 @@ exports.subscribe = async (req, res, next) => {
       // Re-subscribe
       existing.isActive = true;
       await existing.save();
+      // Send welcome back email
+      try {
+        await sendEmail({
+          to: email,
+          subject: "You're back! Welcome to BlogHub 🎉",
+          html: welcomeEmailHtml(email, existing.unsubscribeToken),
+        });
+      } catch (emailErr) {
+        console.error('Re-subscribe email failed:', emailErr.message);
+      }
       return res.json({ success: true, message: 'Welcome back! You have been re-subscribed.' });
     }
 
