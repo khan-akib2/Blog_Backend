@@ -22,7 +22,7 @@ async function callGemini(prompt) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.8, maxOutputTokens: 2048 },
+          generationConfig: { temperature: 0.85, maxOutputTokens: 4096 },
         }),
       }
     );
@@ -40,11 +40,18 @@ async function callGemini(prompt) {
 }
 
 // ── System persona ────────────────────────────────────────────────────────────
-const SYSTEM = `You are BlogHub AI, an expert blog writing assistant. 
-You write in a professional, engaging, and modern style.
-Always use proper HTML formatting with headings, paragraphs, bold text, and lists where appropriate.
-Make content feel like it was written by a knowledgeable human expert, not a robot.
-Be detailed, insightful, and add real value to the reader.`;
+const SYSTEM = `You are BlogHub AI, a world-class blog writer and content strategist.
+Your writing style is authoritative yet conversational — like a brilliant friend who happens to be an expert.
+You write with personality, depth, and genuine insight. Your content never sounds robotic or copy-pasted.
+
+STRICT FORMATTING RULES:
+- Use rich, semantic HTML only. Never use markdown (no **, no ##, no backticks).
+- Structure content with <h2> and <h3> headings, <p> paragraphs, <ul>/<ol> lists, <blockquote> for key insights.
+- Use <strong> to highlight critical terms and <em> for nuance or emphasis.
+- Every section must feel purposeful — no filler, no generic fluff.
+- Write like a human expert: use analogies, real-world examples, surprising facts, and actionable advice.
+- Vary sentence length for rhythm. Mix short punchy sentences with detailed explanations.
+- Never start two consecutive paragraphs the same way.`;
 
 // ── POST /api/ai/generate ─────────────────────────────────────────────────────
 router.post('/generate', protect, async (req, res) => {
@@ -60,98 +67,134 @@ router.post('/generate', protect, async (req, res) => {
     const prompts = {
       intro: `${SYSTEM}
 
-Write a compelling, detailed introduction (3-4 paragraphs) for a blog post about: "${topic}".
+Write a gripping, deeply engaging introduction (4 paragraphs) for a blog post about: "${topic}".
 ${context ? `Blog context: ${context}` : ''}${historyText}
 
-Format as HTML with:
-- An engaging opening <p> that hooks the reader
-- 2-3 more <p> tags building context and importance
-- Use <strong> for key terms
-- End with a transition sentence
+Requirements:
+- Paragraph 1: Open with a surprising fact, bold statement, or vivid scenario that immediately hooks the reader. Make them feel something.
+- Paragraph 2: Establish why this topic matters RIGHT NOW. Use <strong> to highlight the core problem or opportunity.
+- Paragraph 3: Briefly preview what the reader will learn — make it feel like a promise worth keeping.
+- Paragraph 4: A smooth transition that pulls them deeper into the article.
 
-Return ONLY the HTML content, no markdown, no code blocks.`,
+HTML structure to use:
+<p>[Hook paragraph — surprising, vivid, emotional]</p>
+<p>[Why it matters — context, stakes, <strong>key terms</strong>]</p>
+<p>[What they'll learn — a compelling preview]</p>
+<p>[Transition into the article body]</p>
+
+Return ONLY the HTML. No markdown, no code fences, no extra explanation.`,
 
       outline: `${SYSTEM}
 
-Create a comprehensive, detailed blog post outline for: "${topic}".
+Create a comprehensive, well-structured blog post outline for: "${topic}".
 ${context ? `Context: ${context}` : ''}${historyText}
 
-Format as HTML:
-- Use <h2> for main sections (5-7 sections)
-- Use <ul><li> for sub-points under each section (2-3 per section)
-- Add a brief <p> description after each <h2>
-- Include an intro section and conclusion section
+Requirements:
+- 6-8 main sections covering the topic thoroughly
+- Each section has a punchy, curiosity-driving <h2> title
+- 3-4 bullet points per section showing what will be covered
+- A brief 1-sentence teaser <p> under each <h2>
+- Include an Introduction and Conclusion section
 
-Return ONLY the HTML content, no markdown, no code blocks.`,
+HTML structure:
+<h2>[Section Title]</h2>
+<p>[One-sentence teaser of what this section covers]</p>
+<ul>
+  <li>[Sub-point 1]</li>
+  <li>[Sub-point 2]</li>
+  <li>[Sub-point 3]</li>
+</ul>
+
+Return ONLY the HTML. No markdown, no code fences.`,
 
       paragraph: `${SYSTEM}
 
-Write a detailed, expert-level paragraph for a blog post about: "${topic}".
+Write a single, expert-level paragraph for a blog post about: "${topic}".
 ${context ? `Context: ${context}` : ''}${historyText}
 
-Format as HTML:
-- One well-structured <p> tag (150-200 words)
-- Use <strong> for important terms
-- Be specific, add facts or examples where relevant
+Requirements:
+- 180-220 words, dense with insight
+- Open with a strong topic sentence
+- Include a specific example, statistic, or analogy to make it concrete
+- Use <strong> for 2-3 key terms
+- End with a sentence that naturally leads to the next idea
+- Sound like a knowledgeable human, not a textbook
 
-Return ONLY the HTML content, no markdown, no code blocks.`,
+Return ONLY a single <p> tag with the content. No markdown, no code fences.`,
 
       section: `${SYSTEM}
 
-Write a complete blog section with heading and content about: "${topic}".
+Write a complete, in-depth blog section about: "${topic}".
 ${context ? `Context: ${context}` : ''}${historyText}
 
-Format as HTML:
-- Start with <h2> heading
-- 2-3 <p> paragraphs of detailed content
-- Add a <ul> list if relevant
-- Use <strong> for key terms
+Requirements:
+- A compelling <h2> heading (not generic — make it specific and interesting)
+- An optional <h3> sub-heading if the section has a natural split
+- 3 substantial <p> paragraphs (each 100-150 words) with real depth
+- One <ul> or <ol> list with 4-6 actionable or insightful points
+- Use <strong> for key terms, <em> for nuance
+- Optional: one <blockquote> for a key insight or memorable takeaway
+- Write with authority and personality — no fluff
 
-Return ONLY the HTML content, no markdown, no code blocks.`,
+Return ONLY the HTML. No markdown, no code fences.`,
 
       conclusion: `${SYSTEM}
 
-Write a powerful conclusion for a blog post about: "${topic}".
+Write a powerful, memorable conclusion for a blog post about: "${topic}".
 ${context ? `Context: ${context}` : ''}${historyText}
 
-Format as HTML:
-- Opening <p> summarizing key takeaways
-- Middle <p> with actionable advice or insights
-- Closing <p> with a strong call-to-action
-- Use <strong> for emphasis
+Requirements:
+- Paragraph 1: Synthesize the key insights — don't just list them, connect them into a bigger picture
+- Paragraph 2: Give the reader a clear, specific next step or call-to-action. Make it feel urgent and achievable.
+- Paragraph 3: End with a thought-provoking statement, question, or inspiring line that stays with the reader
 
-Return ONLY the HTML content, no markdown, no code blocks.`,
+HTML structure:
+<p>[Synthesis of key insights — the "so what"]</p>
+<p>[Specific, actionable next step with <strong>emphasis</strong> on the most important action]</p>
+<p>[Memorable closing line — inspiring, thought-provoking, or a powerful question]</p>
+
+Return ONLY the HTML. No markdown, no code fences.`,
 
       faqs: `${SYSTEM}
 
-Generate 5 detailed FAQ entries for a blog post about: "${topic}".
+Generate 6 insightful, specific FAQ entries for a blog post about: "${topic}".
 ${context ? `Context: ${context}` : ''}${historyText}
 
-Return a JSON array ONLY (no markdown, no explanation):
+Requirements:
+- Questions must be the REAL questions people actually search for — not generic
+- Answers must be genuinely helpful: 3-4 sentences, specific, with practical detail
+- Mix question types: how-to, why, what, comparison, common misconception
+- Answers should feel like they came from an expert, not a FAQ bot
+
+Return a JSON array ONLY — no markdown, no explanation, no code fences:
 [
   {"question": "...", "answer": "..."},
   {"question": "...", "answer": "..."},
   {"question": "...", "answer": "..."},
   {"question": "...", "answer": "..."},
+  {"question": "...", "answer": "..."},
   {"question": "...", "answer": "..."}
-]
+]`,
 
-Make questions specific and answers detailed (2-3 sentences each).`,
-
-      tags: `Generate 10 highly relevant SEO tags for a blog post about: "${topic}".
+      tags: `You are an SEO expert. Generate 10 highly targeted, search-intent-driven tags for a blog post about: "${topic}".
 ${context ? `Context: ${context}` : ''}
 
-Return ONLY a comma-separated list of single words or short 2-word phrases. No numbers, no explanation.`,
+Rules:
+- Mix broad terms (high volume) and specific long-tail phrases (high intent)
+- Use lowercase, no special characters except hyphens
+- Include the main topic keyword, related subtopics, and audience-specific terms
+- Return ONLY a comma-separated list. No numbers, no explanation, no extra text.`,
 
       chat: `${SYSTEM}
 
 The user is writing a blog post about: "${topic}".
-${context ? `Current blog content summary: ${context}` : ''}${historyText}
+${context ? `Current blog content: ${context}` : ''}${historyText}
 
 User message: ${req.body.message || topic}
 
-Respond helpfully as a blog writing assistant. If they ask for content, provide it in HTML format.
-Keep response concise and actionable.`,
+Respond as a sharp, helpful blog writing partner. Be direct and specific.
+If they ask for content, write it in clean HTML. If they ask a question, answer it concisely with actionable advice.
+Never be vague. Always give them something they can immediately use.`,
     };
 
     const prompt = prompts[type] || prompts.chat;
